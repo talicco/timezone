@@ -1,0 +1,228 @@
+<!DOCTYPE html><html lang="en"><head>    
+    <meta charset="UTF-8">    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">    
+    <title>Timezone Map</title>    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>    
+    <style>        
+        body { margin: 0; padding: 0; background: #1a1a1a; font-family: sans-serif; color: white; overflow: hidden; }        
+        #map { height: 100dvh; width: 100vw; background: #242424; }                
+        
+        /* Compact Top Panel */
+        .panel {            
+            position: absolute;            
+            top: 15px;            
+            left: 70px; 
+            right: 15px;            
+            z-index: 1000;            
+            background: rgba(30, 30, 30, 0.9);            
+            padding: 8px 15px;            
+            border-radius: 3px;            
+            border: 1px solid #444;            
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-sizing: border-box;
+        }        
+        
+        .panel-left { display: flex; align-items: center; gap: 15px; }
+        .panel-right { display: flex; flex-direction: column; align-items: flex-end; }
+        .links-row { display: flex; gap: 12px; }
+
+        .country-name { color: #00ffcc; font-size: 1rem; font-weight: bold; }        
+        .time-big { font-size: 1.5rem; font-family: monospace; font-weight: bold; }        
+        .offset { color: #888; font-size: 0.65rem; letter-spacing: 0.15rem; text-transform: uppercase; }        
+        .id { color: #888; font-size: 0.6rem; letter-spacing: 0.15rem; text-transform: uppercase; margin-bottom: 2px; }        
+        
+        .link a { color: #888; text-decoration: none; font-size: 0.6rem; letter-spacing: 0.15rem; text-transform: uppercase; cursor: pointer; display: inline-block; }
+        .link a:hover { color: #00ffcc; }
+                
+        .leaflet-container { background: #1a1a1a !important; }
+        .leaflet-top { top: 15px !important; }
+        .leaflet-left { left: 15px !important; }
+
+        /* True Fullscreen Inner App Page */
+        .page-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; 
+            width: 100vw; height: 100dvh;
+            background: #1a1a1a; /* Seamless transition matching app background */
+            z-index: 2000;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+        .page-overlay.active { display: block; }
+        
+        .page-content {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 60px 20px;
+            box-sizing: border-box;
+        }
+        .page-content h2 { color: #00ffcc; margin-top: 0; font-size: 1.6rem; text-transform: uppercase; letter-spacing: 0.1rem; border-bottom: 1px solid #444; padding-bottom: 12px; }
+        .page-content h3 { color: white; font-size: 1.1rem; margin-top: 30px; text-transform: uppercase; letter-spacing: 0.05rem; }
+        .page-content p, .page-content li { color: #aaa; font-size: 0.95rem; line-height: 1.7; }
+        .page-content ul { padding-left: 20px; }
+        .close-container { margin-top: 40px; border-top: 1px solid #444; padding-top: 20px; }
+
+        /* Responsive Mobile Layout adjustments */
+        @media (max-width: 768px) {
+            .panel { 
+                top: 15px;
+                left: 65px;
+                right: 15px;
+                flex-direction: column; 
+                align-items: flex-start; 
+                padding: 8px 12px; 
+                gap: 4px;
+            }
+            .panel-left { flex-direction: column; gap: 0px; align-items: flex-start; }
+            .time-big { font-size: 1.3rem; }
+            .panel-right { align-items: flex-start; width: 100%; border-top: 1px solid #444; padding-top: 4px; margin-top: 2px; }
+            .links-row { flex-wrap: wrap; gap: 8px; }
+            .page-content { padding: 40px 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="panel">         
+        <div class="panel-left">
+            <div id="name" class="country-name">hover over a country</div>        
+            <div id="time" class="time-big">00:00:00</div>        
+            <div id="offset" class="offset">UTC --:--</div>
+        </div>
+        
+        <div class="panel-right">
+            <div id="id" class="id"></div>        
+            <div class="links-row">
+                <div class="link"><a id="openHelp">Info / Help</a></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="helpPage" class="page-overlay">
+        <div class="page-content">
+            <h2>About Timezone Map</h2>
+            <p>This interactive application renders global geographic data frames dynamically, matching targeted borders with localized runtime environments natively.</p>
+            
+            <h3>How to use:</h3>
+            <ul>
+                <li><strong>Desktop:</strong> Hover your pointer across country partitions to track continuous local clocks and UTC offsets instantly.</li>
+                <li><strong>Mobile Devices:</strong> Use touch gestures to pan or zoom, and tap on map regions to select and view a country's current time data.</li>
+            </ul>
+            
+            <div class="close-container">
+                <div class="link"><a id="closeHelp">&larr; Back to Map</a></div>
+            </div>
+        </div>
+    </div>
+
+    <script>        
+        const map = L.map('map', {            
+            center: [20, 0],            
+            zoom: 2,            
+            minZoom: 2,            
+            maxBounds: [[-90, -180], [90, 180]]        
+        });
+        
+        let currentTz = "UTC";        
+        let geojsonLayer;
+        let lastHighlightedLayer = null;
+
+        const nameEl = document.getElementById('name');        
+        const timeEl = document.getElementById('time');        
+        const offsetEl = document.getElementById('offset');        
+
+        // Fullscreen App Page Routing Toggle Interactions
+        const helpPage = document.getElementById('helpPage');
+        document.getElementById('openHelp').addEventListener('click', (e) => { e.preventDefault(); helpPage.classList.add('active'); });
+        document.getElementById('closeHelp').addEventListener('click', (e) => { e.preventDefault(); helpPage.classList.remove('active'); });
+
+        function getTimezone(countryCode) {            
+            const zonesMap = {                
+                'US': 'America/New_York', 'CA': 'America/Toronto', 'RU': 'Europe/Moscow',                
+                'CN': 'Asia/Shanghai', 'BR': 'America/Sao_Paulo', 'AU': 'Australia/Sydney',                
+                'IN': 'Asia/Kolkata', 'GB': 'Europe/London', 'FR': 'Europe/Paris',                
+                'DE': 'Europe/Berlin', 'ZA': 'Africa/Johannesburg', 'JP': 'Asia/Tokyo',                
+                'MX': 'America/Mexico_City', 'AR': 'America/Argentina/Buenos_Aires',                
+                'ID': 'Asia/Jakarta', 'SA': 'Asia/Riyadh', 'TR': 'Europe/Istanbul'            
+            };            
+            return zonesMap[countryCode] || null;        
+        }
+        
+        function handleFeatureSelect(layer, feature) {
+            if (lastHighlightedLayer && lastHighlightedLayer !== layer) {
+                geojsonLayer.resetStyle(lastHighlightedLayer);
+            }
+
+            layer.setStyle({ fillColor: '#00ffcc', fillOpacity: 0.5 });
+            lastHighlightedLayer = layer;
+                                            
+            const name = feature.properties.name;
+            const code = feature.properties.iso_a2;
+            nameEl.textContent = name;
+                                            
+            currentTz = getTimezone(code) || 'UTC';
+            updateClock();
+        }
+
+        fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson')            
+            .then(res => res.json())            
+            .then(data => {                
+                geojsonLayer = L.geoJson(data, {                    
+                    style: {                        
+                        fillColor: '#333',                        
+                        weight: 1,                        
+                        opacity: 1,                        
+                        color: '#555',                        
+                        fillOpacity: 0.7                    
+                    },                    
+                    onEachFeature: (feature, layer) => {                        
+                        layer.on({                            
+                            mouseover: (e) => {                                
+                                handleFeatureSelect(e.target, feature);
+                            },                            
+                            mouseout: (e) => {                                
+                                if (!L.Browser.touch) {
+                                    geojsonLayer.resetStyle(e.target);
+                                }
+                            },
+                            click: (e) => {
+                                handleFeatureSelect(e.target, feature);
+                                L.DomEvent.stopPropagation(e);
+                            }
+                        });                    
+                    }                
+                }).addTo(map);            
+            });
+
+        function updateClock() {            
+            const now = new Date();            
+            try {                
+                const timeStr = new Intl.DateTimeFormat('en-GB', {                    
+                    timeZone: currentTz,                    
+                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false                
+                }).format(now);
+
+                const offsetStr = new Intl.DateTimeFormat('en-GB', {                    
+                    timeZone: currentTz,                    
+                    timeZoneName: 'shortOffset'                
+                }).formatToParts(now).find(p => p.type === 'timeZoneName').value;
+
+                timeEl.textContent = timeStr;                
+                offsetEl.textContent = offsetStr;            
+            } catch (e) {                
+                timeEl.textContent = "00:00:00";                
+                offsetEl.textContent = "UTC --:--";
+            }        
+        }
+
+        setInterval(updateClock, 1000);    
+    </script>
+</body>
+</html>
